@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: pref
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    healthCheckTimeout: 30
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: PYTHONUNBUFFERED
+        value: "1"

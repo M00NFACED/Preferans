@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.DS_Store
+shots*/
+shots*/
+*.log
+tools/cloudflared.exe
