@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d2417">
+<title>Преферанс — игра с друзьями</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%E2%99%A0</text></svg>">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ================= ГЛАВНАЯ ================= -->
+  <section class="screen" id="screen-home">
+    <div class="panel home">
+      <div class="crest">
+        <span class="crest-suit">♠</span><span class="crest-suit red">♥</span>
+      </div>
+      <h1>Преферанс</h1>
+      <p class="sub">Трое, 32 карты, без рекламы. Создайте комнату и позовите друзей по коду.</p>
+
+      <label class="field">
+        <span>Ваше имя</span>
+        <input id="input-name" type="text" maxlength="20" placeholder="Игрок" autocomplete="nickname">
+      </label>
+
+      <div class="btn-row">
+        <button class="btn primary" id="btn-create">Создать комнату</button>
+      </div>
+
+      <div class="divider"><span>или войти по коду</span></div>
+
+      <div class="btn-row">
+        <input id="input-code" type="text" maxlength="6" placeholder="КОД" autocomplete="off" autocapitalize="characters">
+        <button class="btn" id="btn-join">Войти</button>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn ghost" id="btn-quick">Быстрая игра с двумя ботами</button>
+      </div>
+
+      <div class="divider"><span>или</span></div>
+      <div class="btn-row">
+        <button class="btn ghost" id="btn-cheat">Шпаргалка</button>
+        <button class="btn ghost" id="btn-rules">Правила</button>
+      </div>
+
+      <p class="status" id="home-status"></p>
+    </div>
+  </section>
+
+  <!-- ================= ЛОББИ ================= -->
+  <section class="screen" id="screen-lobby">
+    <div class="panel">
+      <h2>Комната</h2>
+      <div class="code-box">
+        <div class="code" id="room-code">-----</div>
+        <button class="btn small" id="btn-copy">Скопировать</button>
+      </div>
+      <p class="hint">Отправьте код друзьям — они введут его на главной.</p>
+
+      <div id="lobby-seats" class="seats-list"></div>
+
+      <div class="btn-row">
+        <button class="btn" id="btn-add-bot">Добавить бота</button>
+        <button class="btn ghost" id="btn-leave-room">Выйти</button>
+      </div>
+
+      <div class="settings">
+        <div class="field">
+          <span>Вариант</span>
+          <div class="seg" id="seg-variant">
+            <button data-value="1" class="active">Сочи</button>
+            <button data-value="2">Ленинград</button>
+          </div>
+        </div>
+        <div class="field">
+          <span>Длина пули</span>
+          <div class="seg" id="seg-bullet">
+            <button data-value="5">5</button>
+            <button data-value="10">10</button>
+            <button data-value="15">15</button>
+            <button data-value="30" class="active">30</button>
+            <button data-value="50">50</button>
+          </div>
+        </div>
+        <div class="field">
+          <span>Слепая игра</span>
+          <div class="seg" id="seg-blind">
+            <button data-value="0" class="active">Выключена</button>
+            <button data-value="1">Разрешена</button>
+          </div>
+          <p class="hint" style="margin:6px 0 0">Разрешает объявлять контракт вслепую
+          (перебивается только заявкой на уровень выше) и вистовать вслепую. Ставки удваиваются.</p>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn primary wide" id="btn-start">Начать игру</button>
+      </div>
+      <p class="status" id="lobby-status"></p>
+    </div>
+  </section>
+
+  <!-- ================= ИГРА ================= -->
+  <section class="screen" id="screen-game">
+    <header class="topbar">
+      <button class="icon-btn" id="btn-menu" title="Меню">☰</button>
+      <div class="topbar-info">
+        <span id="top-contract">—</span>
+        <span id="top-round">Раунд 1</span>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" id="btn-sound" title="Звук">♪</button>
+        <span id="top-code" class="pill" title="Код комнаты">-----</span>
+      </div>
+    </header>
+
+    <div class="scorebar" id="scorebar"></div>
+
+    <div class="felt">
+      <div class="emblem" aria-hidden="true">
+        <span>♠</span><span>♥</span><span>♣</span><span>♦</span>
+      </div>
+
+      <div class="player-slot left" id="slot-left"></div>
+
+      <div class="center">
+        <div class="plaque" id="plaque"></div>
+        <div class="center-hint" id="center-hint"></div>
+        <div class="talon-zone" id="talon"></div>
+        <div class="trick-area" id="trick"></div>
+      </div>
+
+      <div class="player-slot right" id="slot-right"></div>
+    </div>
+
+    <div class="bottom">
+      <div class="hand" id="hand"></div>
+      <div class="actions" id="actions"></div>
+    </div>
+
+    <div class="log-box" id="log-box">
+      <div class="log-head" id="log-head">Журнал <span class="chev">▾</span></div>
+      <div class="log" id="log"></div>
+    </div>
+  </section>
+
+  <!-- ================= РЕЗУЛЬТАТ ================= -->
+  <section class="screen" id="screen-result">
+    <div class="panel">
+      <h2 id="result-title">Раунд завершён</h2>
+      <div id="result-body"></div>
+      <div class="btn-row">
+        <button class="btn primary wide" id="btn-next-round">Следующий раунд</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost" id="btn-result-menu">В меню</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ПРАВИЛА ================= -->
+  <section class="screen" id="screen-rules">
+    <div class="panel rules">
+      <h2>Правила</h2>
+      <div id="rules-body"></div>
+      <div class="btn-row">
+        <button class="btn primary wide" id="btn-rules-back">Назад</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ШПАРГАЛКА ================= -->
+  <section class="screen" id="screen-cheats">
+    <div class="panel rules wide-panel">
+      <h2>Шпаргалка</h2>
+      <div class="seg cheat-tabs" id="cheat-tabs">
+        <button data-tab="hand" class="active">По моей руке</button>
+        <button data-tab="combos">Таблица комбинаций</button>
+        <button data-tab="holes">Ловля мизера</button>
+      </div>
+      <div id="cheat-body"></div>
+      <div class="btn-row">
+        <button class="btn primary wide" id="btn-cheat-back">Назад</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= МЕНЮ ================= -->
+  <section class="screen" id="screen-menu">
+    <div class="panel">
+      <h2>Меню</h2>
+      <p class="hint" id="menu-room"></p>
+      <div class="field">
+        <span>Подписи карт</span>
+        <div class="seg" id="seg-rankmode">
+          <button data-value="cyr" class="active">В Д К Т</button>
+          <button data-value="lat">J Q K A</button>
+        </div>
+      </div>
+      <div class="btn-row"><button class="btn wide" id="btn-menu-resume">Продолжить игру</button></div>
+      <div class="btn-row"><button class="btn wide" id="btn-menu-cheat">Шпаргалка</button></div>
+      <div class="btn-row"><button class="btn wide" id="btn-menu-rules">Правила</button></div>
+      <div class="btn-row"><button class="btn ghost wide" id="btn-menu-leave">Выйти из комнаты</button></div>
+    </div>
+  </section>
+
+</div>
+
+<div class="toast" id="toast"></div>
+<canvas id="confetti" class="confetti"></canvas>
+<button class="fab" id="btn-cheat-fab" title="Шпаргалка">?</button>
+
+<script src="/js/cards.js"></script>
+<script src="/js/sound.js"></script>
+<script src="/js/cheatsheet.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
