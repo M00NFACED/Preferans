@@ -245,7 +245,7 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
   margin: 8px 8px 0;
   border-radius: 24px;
   display: grid; grid-template-columns: 92px 1fr 92px;
-  grid-template-rows: minmax(0, 1fr) auto; gap: 4px;
+  grid-template-rows: auto minmax(0, 1fr) auto; gap: 4px;
   padding: 10px 8px;
   background:
     radial-gradient(120% 90% at 50% 8%, var(--felt-1) 0%, var(--felt-2) 48%, var(--felt-3) 100%),
@@ -256,6 +256,7 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
     0 0 0 8px rgba(255,255,255,.07),
     inset 0 0 100px rgba(0,0,0,.42),
     0 16px 34px rgba(0,0,0,.5);
+  overflow: hidden;
 }
 .felt::after {
   content: "";
@@ -267,10 +268,15 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
   display: flex; flex-direction: column; gap: 6px; align-items: center;
   justify-content: flex-start; position: relative; z-index: 1;
 }
-.player-slot.left { grid-column: 1; grid-row: 1; }
-.player-slot.right { grid-column: 3; grid-row: 1; }
-.center {
+.player-slot.left { grid-column: 1; grid-row: 1 / span 2; }
+.player-slot.right { grid-column: 3; grid-row: 1 / span 2; }
+.felt-top {
   grid-column: 2; grid-row: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  min-width: 0; position: relative; z-index: 1;
+}
+.center {
+  grid-column: 2; grid-row: 2;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; min-width: 0; position: relative; z-index: 1; height: 100%;
 }
@@ -454,15 +460,14 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
 .card.s-xs .idx .r { font-size: .95em; }
 .card.s-xs .pip .suit { width: 2.2em; height: 2.2em; }
 
-/* --- рука */
-.bottom {
-  background: linear-gradient(180deg, rgba(8,18,12,.5), rgba(8,18,12,.9));
-  border-top: 1px solid rgba(255,255,255,.05);
-  padding-bottom: env(safe-area-inset-bottom);
-}
+/* --- рука: лежит поверх стола */
 .hand-row {
+  grid-column: 1 / -1; grid-row: 3;
   display: flex; align-items: stretch; gap: 8px;
-  padding: 10px 10px 2px;
+  padding: 10px 10px calc(8px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(6,18,12,0), rgba(6,18,12,.5));
+  border-radius: 0 0 20px 20px;
+  position: relative; z-index: 3;
 }
 .hand {
   flex: 1 1 auto; min-width: 0;
@@ -498,7 +503,7 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
   box-shadow: 0 0 0 1px var(--gold), 0 8px 22px rgba(242,193,78,.18);
 }
 .hand-tools {
-  flex: 0 0 auto; display: flex; align-items: stretch; gap: 6px;
+  flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; justify-content: center;
 }
 .table-btn {
   flex: 0 0 62px;
@@ -722,7 +727,7 @@ table.result td.vists.neg { color: var(--red); }
   .my-info .nm { font-size: 14px; }
   .my-info .stat { font-size: 12.5px; }
   .hand-tools { gap: 8px; }
-  .table-btn { flex-basis: 80px; }
+  .table-btn { flex-basis: 64px; }
   .table-btn-icon { font-size: 24px; }
   .table-btn-label { font-size: 11px; }
   .turn-timer { font-size: 14px; padding: 6px 11px; min-width: 76px; }
@@ -768,7 +773,7 @@ table.result td.vists.neg { color: var(--red); }
   .card.s-xs { --cw: 24px; --ch: 35px; }
   .cheat-grid { gap: 3px; }
   .cheat-grid .card { --cw: 40px; --ch: 58px; }
-  .hand-row { gap: 4px; padding: 8px 3px 1px; }
+  .hand-row { gap: 4px; padding: 8px 3px calc(4px + env(safe-area-inset-bottom)); }
   .hand { gap: 0; padding: 8px 0 4px; justify-content: flex-start; }
   .hand .card { margin-left: -24px; }
   .hand .card:first-child { margin-left: 0; }
