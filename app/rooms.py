@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import random
 import string
+import time
 import uuid
 
 from . import bot as bot_ai
@@ -30,7 +31,7 @@ from .game import (
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 BOT_DELAY = (0.7, 1.6)
 AUTO_NEXT_ROUND_DELAY = 25.0
-AUTO_MOVE_TIMEOUT = 45.0
+AUTO_MOVE_TIMEOUT = 180.0  # 3 минуты на ход; затем за игрока играет бот
 TRICK_SHOW_TIME = 2.6  # сколько показываем собранную взятку перед розыгрышем
 
 
@@ -107,6 +108,7 @@ class Room:
         self.next_round_task: asyncio.Task | None = None
         self.auto_move_task: asyncio.Task | None = None
         self.resolve_task: asyncio.Task | None = None
+        self.turn_deadline: float | None = None
         self._bot_counter = 0
         self.lock = asyncio.Lock()
 
@@ -278,7 +280,14 @@ class Room:
             and self.seats[seat]["player_id"] == self.host_id,
         }
         if self.game is not None:
-            state["game"] = self.game.view(seat)
+            game = self.game.view(seat)
+            if self.turn_deadline is not None:
+                game["turn_deadline"] = round(self.turn_deadline, 3)
+                game["turn_time_left"] = max(
+                    0, int(round(self.turn_deadline - time.time()))
+                )
+                game["turn_timeout"] = int(AUTO_MOVE_TIMEOUT)
+            state["game"] = game
         else:
             state["game"] = None
         return state
@@ -338,7 +347,6 @@ class Room:
                 print(f"[bot] непредвиденная ошибка: {exc}")
                 traceback.print_exc()
                 failed = True
-        await self.broadcast()
         if failed:
             # не зацикливаемся на одной и той же ошибке
             self._bot_retries = getattr(self, "_bot_retries", 0) + 1
@@ -349,6 +357,7 @@ class Room:
         else:
             self._bot_retries = 0
         self.after_action()
+        await self.broadcast()
 
     def _bot_action(self, seat_index: int) -> None:
         game = self.game
@@ -386,28 +395,51 @@ class Room:
                 card_id = game.token_for(card_id)
             game.play(seat_index, card_id)
 
+    def _clear_turn_timer(self) -> None:
+        self._cancel(self.auto_move_task)
+        self.auto_move_task = None
+        self.turn_deadline = None
+
     def after_action(self) -> None:
-        """Проверяет, не пора ли передать ход боту или авто-ходить за отключившегося."""
+        """Передаёт ход боту или запускает трёхминутный таймер для человека."""
         if self.game is None:
+            self._clear_turn_timer()
             return
         if self.game.pending:
             # взятка собрана, но ещё показывается игрокам
+            self._clear_turn_timer()
             self._schedule_resolve()
             return
         if self.game.phase in (PHASE_ROUND_END, PHASE_MATCH_END):
-            self._cancel(self.auto_move_task)
-            self.auto_move_task = None
+            self._clear_turn_timer()
             if self.game.phase == PHASE_ROUND_END and self.next_round_task is None:
                 self.next_round_task = asyncio.create_task(self._auto_next_round())
             return
         if self._current_is_bot():
+            self._clear_turn_timer()
             self.schedule_bot()
             return
         if self.game.turn is not None:
-            seat = self.seats[self.game.turn]
-            if seat is not None and not seat["is_bot"] and not seat["connected"]:
-                self._cancel(self.auto_move_task)
-                self.auto_move_task = asyncio.create_task(self._auto_move())
+            self._schedule_auto_move()
+
+    def _schedule_auto_move(self) -> None:
+        """Запускает таймер хода для человека (в том числе отключившегося)."""
+        self._clear_turn_timer()
+        if self.game is None or self.game.turn is None or self.game.pending:
+            return
+        seat_index = self.game.turn
+        seat = self.seats[seat_index]
+        if seat is None or seat["is_bot"]:
+            return
+        self.turn_deadline = time.time() + AUTO_MOVE_TIMEOUT
+        self.auto_move_task = asyncio.create_task(
+            self._auto_move(
+                seat_index,
+                self.game.phase,
+                self.game.round_number,
+                self.turn_deadline,
+            )
+        )
 
     def _schedule_resolve(self) -> None:
         """Откладывает розыгрыш собранной взятки, чтобы её успели увидеть."""
@@ -419,8 +451,8 @@ class Room:
         async with self.lock:
             if self.game is not None:
                 self.game.resolve_pending()
-        await self.broadcast()
         self.after_action()
+        await self.broadcast()
 
     async def _auto_next_round(self) -> None:
         await asyncio.sleep(AUTO_NEXT_ROUND_DELAY)
@@ -428,48 +460,66 @@ class Room:
             if self.game is not None and self.game.phase == PHASE_ROUND_END:
                 self.game.start_round()
         self.next_round_task = None
-        await self.broadcast()
         self.after_action()
+        await self.broadcast()
 
-    async def _auto_move(self) -> None:
-        await asyncio.sleep(AUTO_MOVE_TIMEOUT)
+    async def _auto_move(
+        self,
+        seat_index: int,
+        phase: str,
+        round_number: int,
+        deadline: float,
+    ) -> None:
+        """Ходит за игрока, если он не успел выбрать действие за 3 минуты."""
+        await asyncio.sleep(max(0.0, deadline - time.time()))
+        timed_out: str | None = None
         async with self.lock:
-            if self.game is None or self.game.turn is None:
+            if (
+                self.game is None
+                or self.game.pending
+                or self.game.turn != seat_index
+                or self.game.phase != phase
+                or self.game.round_number != round_number
+            ):
                 return
-            seat_index = self.game.turn
             seat = self.seats[seat_index]
-            if seat is None or seat["is_bot"] or seat["connected"]:
+            if seat is None or seat["is_bot"]:
                 return
             player = self.game.players[seat_index]
             try:
-                if self.game.phase == PHASE_AUCTION:
-                    self.game.bid(seat_index, "pass")
-                elif self.game.phase == PHASE_DROP:
-                    ids = bot_ai.choose_drop(self.game, seat_index, self.rng)
-                    if player.blind or not player.opened:
-                        ids = [self.game.token_for(card_id) for card_id in ids]
-                    self.game.drop(seat_index, ids)
-                elif self.game.phase == PHASE_DECLARE:
-                    index = player.bid if player.bid is not None else 0
-                    self.game.declare(seat_index, index)
-                elif self.game.phase == PHASE_WHIST:
-                    self.game.whist(seat_index, "pass")
-                elif self.game.phase == PHASE_WHIST_MODE:
-                    self.game.whist_mode(seat_index, False)
-                elif self.game.phase == PHASE_CATCH_MIZER:
-                    self.game.catch_mizer(seat_index, False)
-                elif self.game.phase == PHASE_PLAYING:
-                    legal = self.game.legal_cards(seat_index)
-                    if legal:
-                        card_id = legal[0].id
-                        if player.blind or not player.opened:
-                            card_id = self.game.token_for(card_id)
-                        self.game.play(seat_index, card_id)
-            except GameError:
-                pass
+                if phase == PHASE_AUCTION:
+                    # Не открываем карты «насовсем» по таймауту: сразу
+                    # заявляем доступную ставку (или пас), чтобы ход завершился.
+                    kind, contract_index = bot_ai.choose_bid(
+                        self.game, seat_index, self.rng
+                    )
+                    blind = not player.opened
+                    self.game.bid(
+                        seat_index, kind, contract_index, blind=blind
+                    )
+                else:
+                    self._bot_action(seat_index)
+                timed_out = player.name
+            except GameError as exc:
+                print(f"[timeout] ошибка действия: {exc.code} {exc.message}")
+            except Exception as exc:  # noqa: BLE001
+                import traceback
+
+                print(f"[timeout] непредвиденная ошибка: {exc}")
+                traceback.print_exc()
         self.auto_move_task = None
-        await self.broadcast()
+        self.turn_deadline = None
+        if timed_out:
+            self.game._log(
+                f"Время на ход истекло — за {timed_out} сыграл бот."
+            )
         self.after_action()
+        await self.broadcast()
+        if timed_out:
+            await self.notify(
+                f"Время на ход истекло — за {timed_out} сыграл бот.",
+                "info",
+            )
 
 
 class RoomManager:
