@@ -74,7 +74,8 @@ async def main():
             else:
                 available = game.get("available_bids") or []
                 if available:
-                    await human.send({"type": "bid", "kind": "contract", "contract": available[0]})
+                    # максимальная заявка, чтобы заказчиком точно стал человек
+                    await human.send({"type": "bid", "kind": "contract", "contract": available[-1]})
                 else:
                     await human.send({"type": "bid", "kind": "pass"})
 
@@ -83,16 +84,22 @@ async def main():
     if game["phase"] != "drop":
         return 1
 
-    check(len(game.get("talon") or []) == 2, "прикуп раскрыт и виден всем на сносе")
-    check(len(game.get("hand") or []) == 10, "у заказчика ровно 10 карт на сносе")
+    talon_ids = [c["id"] for c in game.get("talon") or []]
+    hand_ids = [c["id"] for c in game.get("hand") or []]
+    check(len(talon_ids) == 2, "прикуп раскрыт и виден всем на сносе")
+    check(len(hand_ids) == 12, "у заказчика 12 карт на сносе (10 + прикуп)")
+    check(set(talon_ids) <= set(hand_ids), "прикуп уже добавлен в руку заказчика")
 
-    # сносим две карты
-    ids = [c["id"] for c in game["hand"][:2]]
-    await human.send({"type": "drop", "cards": ids})
+    # сносим карту прикупа и ещё одну карту с руки
+    other_id = next(cid for cid in hand_ids if cid not in talon_ids)
+    dropped_talon = talon_ids[0]
+    await human.send({"type": "drop", "cards": [dropped_talon, other_id]})
     await human.wait(lambda s: s["game"]["phase"] in ("declare", "whist"))
     game = human.state["game"]
-    check(len(game.get("hand") or []) == 10, "после сноса снова 10 карт (прикуп ушёл в руку)")
+    check(len(game.get("hand") or []) == 10, "после сноса осталось 10 карт")
     check(len(game.get("talon") or []) == 0, "после сноса прикуп больше не показывается")
+    check(all(c["id"] != dropped_talon for c in game.get("hand") or []),
+          "карту прикупа можно сбросить")
     check(game["phase"] == "declare", "перешли к назначению контракта")
 
     await human.ws.close()

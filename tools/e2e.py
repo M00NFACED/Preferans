@@ -129,8 +129,10 @@ def main() -> int:
             check(game["phase"] == "round_end", "фаза после раунда: " + game["phase"])
             check(sum(p["tricks"] for p in game["players"]) == 10,
                   "розыграно 10 взяток")
-            check(all(p["bullet"] >= 0 and p["vists"] >= -10_000 for p in game["players"]),
-                  "очки в норме")
+            check(all(0 <= p["bullet"] <= game["max_bullet"] for p in game["players"]),
+                  "пуля в пределах лимита")
+            check(all(p["vists"] >= -10_000 for p in game["players"]),
+                  "висты в разумных пределах")
             result = game.get("last_result") or {}
             check(bool(result.get("lines")), "итог раунда содержит пояснения")
 

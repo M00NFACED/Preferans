@@ -101,8 +101,25 @@ def choose_open(game: Game, seat: int, rng: random.Random) -> bool:
     return rng.random() < 0.7
 
 
+def _blind_bid(game: Game, seat: int, rng: random.Random) -> tuple[str, int | None]:
+    """Заявка без знания руки: игрок ещё не открывал карты."""
+    available = game.available_bids()
+    if not available:
+        return "pass", None
+    if game.current_bid is None and game.can_declare_miser(seat) and rng.random() < 0.15:
+        return "miser", None
+    if not game.can_bid_blind(seat):
+        return "pass", None
+    if rng.random() < 0.45:
+        return "pass", None
+    index = available[0] if rng.random() < 0.7 else rng.choice(available)
+    return "contract", index
+
+
 def choose_bid(game: Game, seat: int, rng: random.Random) -> tuple[str, int | None]:
     player = game.players[seat]
+    if not player.opened:
+        return _blind_bid(game, seat, rng)
     hand = player.hand
     margin = 1.0 + rng.random() * 0.8
     available = game.available_bids()
@@ -151,6 +168,9 @@ def choose_bid(game: Game, seat: int, rng: random.Random) -> tuple[str, int | No
 
 def choose_drop(game: Game, seat: int, rng: random.Random) -> list[int]:
     player = game.players[seat]
+    if player.blind:
+        # слепой заказчик не знает своих карт — сбрасываем случайные две
+        return [c.id for c in rng.sample(player.hand, 2)]
     trump = game.trump()
     hand = player.hand
     miser = game.round_type == ROUND_MIZER
@@ -179,13 +199,14 @@ def choose_drop(game: Game, seat: int, rng: random.Random) -> list[int]:
 
 def choose_whist(game: Game, seat: int, rng: random.Random) -> str:
     player = game.players[seat]
+    if player.blind:
+        return "vist" if rng.random() < 0.5 else "pass"
     if game.contract is None:
         return "pass"
     trump = game.contract.trump
     est = estimate_tricks(player.hand, trump)
     half = game.contract.tricks in R.HALF_WHIST_CONTRACTS
     need = R.whist_requirement(game.contract.tricks, half)
-    reward = R.whist_reward(game.contract.tricks, half, game.variant)
     if half:
         # полвиста выгоднее, если вист вообще недоступен
         if est >= need - 0.3 and rng.random() < 0.8:
@@ -198,6 +219,8 @@ def choose_whist(game: Game, seat: int, rng: random.Random) -> str:
 
 def choose_catch_mizer(game: Game, seat: int, rng: random.Random) -> bool:
     player = game.players[seat]
+    if player.blind:
+        return rng.random() < 0.5
     est = max(estimate_tricks(player.hand, s) for s in C.SUIT_ORDER)
     # ловить мизер выгодно, когда рука сильная
     return est >= 4.0 + rng.random() * 0.6
@@ -210,9 +233,13 @@ def choose_whist_mode(game: Game, seat: int, rng: random.Random) -> bool:
     вслепую — gamble на удвоенную премию.
     """
     player = game.players[seat]
+    if player.blind:
+        return rng.random() < 0.5
     if game.contract is None:
         return False
-    need = R.whist_requirement(game.contract.tricks, game.half_whist)
+    need = R.whist_requirement(
+        game.contract.tricks, player.whist_kind == "half"
+    )
     est = max(estimate_tricks(player.hand, s) for s in C.SUIT_ORDER)
     if est >= need - 0.2:
         return False
@@ -234,6 +261,10 @@ def choose_card(game: Game, seat: int, rng: random.Random) -> int:
         legal = list(player.hand)
     if not legal:
         raise RuntimeError("у бота нет карт")
+
+    if player.blind:
+        # слепой игрок не знает руки — выбираем равновероятно
+        return rng.choice(legal).id
 
     trump = game.trump()
     is_mizer = game.round_type == ROUND_MIZER and seat == game.miser_player

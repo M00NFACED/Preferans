@@ -34,6 +34,30 @@ AUTO_MOVE_TIMEOUT = 45.0
 TRICK_SHOW_TIME = 2.6  # сколько показываем собранную взятку перед розыгрышем
 
 
+def normalize_options(options: dict) -> dict:
+    """Проверяет и приводит параметры комнаты к допустимым значениям."""
+    try:
+        variant = int(options.get("variant", R.VARIANT_SOCHI))
+        max_bullet = int(options.get("max_bullet", 30))
+    except (TypeError, ValueError) as exc:
+        raise GameError(
+            "bad_options", "variant и max_bullet должны быть числами."
+        ) from exc
+    if variant not in R.VARIANT_NAMES:
+        raise GameError("bad_options", "Неизвестный вариант игры.")
+    if max_bullet not in R.BULLET_LENGTHS:
+        raise GameError(
+            "bad_options",
+            "Длина пули должна быть одной из: "
+            + ", ".join(str(value) for value in R.BULLET_LENGTHS)
+            + ".",
+        )
+    blind = options.get("blind", True)
+    if not isinstance(blind, bool):
+        blind = str(blind).strip().lower() in ("1", "true", "yes", "on")
+    return {"variant": variant, "max_bullet": max_bullet, "blind": blind}
+
+
 class Connection:
     """Обёртка над WebSocket: очередь сообщений + фоновой писатель."""
 
@@ -73,11 +97,7 @@ class Connection:
 class Room:
     def __init__(self, code: str, options: dict, rng: random.Random):
         self.code = code
-        self.options = {
-            "variant": int(options.get("variant", R.VARIANT_SOCHI)),
-            "max_bullet": int(options.get("max_bullet", 30)),
-            "blind": bool(options.get("blind", True)),
-        }
+        self.options = normalize_options(options)
         self.rng = rng
         self.seats: list[dict | None] = [None, None, None]
         self.connections: dict[str, Connection] = {}
@@ -346,6 +366,8 @@ class Room:
             game.bid(seat_index, kind, contract_index, blind=blind)
         elif phase == PHASE_DROP:
             ids = bot_ai.choose_drop(game, seat_index, self.rng)
+            if player.blind or not player.opened:
+                ids = [game.token_for(card_id) for card_id in ids]
             game.drop(seat_index, ids)
         elif phase == PHASE_DECLARE:
             index = player.bid if player.bid is not None else 0
@@ -360,6 +382,8 @@ class Room:
             game.catch_mizer(seat_index, accept)
         elif phase == PHASE_PLAYING:
             card_id = bot_ai.choose_card(game, seat_index, self.rng)
+            if player.blind or not player.opened:
+                card_id = game.token_for(card_id)
             game.play(seat_index, card_id)
 
     def after_action(self) -> None:
@@ -422,18 +446,25 @@ class Room:
                     self.game.bid(seat_index, "pass")
                 elif self.game.phase == PHASE_DROP:
                     ids = bot_ai.choose_drop(self.game, seat_index, self.rng)
+                    if player.blind or not player.opened:
+                        ids = [self.game.token_for(card_id) for card_id in ids]
                     self.game.drop(seat_index, ids)
                 elif self.game.phase == PHASE_DECLARE:
                     index = player.bid if player.bid is not None else 0
                     self.game.declare(seat_index, index)
                 elif self.game.phase == PHASE_WHIST:
                     self.game.whist(seat_index, "pass")
+                elif self.game.phase == PHASE_WHIST_MODE:
+                    self.game.whist_mode(seat_index, False)
                 elif self.game.phase == PHASE_CATCH_MIZER:
                     self.game.catch_mizer(seat_index, False)
                 elif self.game.phase == PHASE_PLAYING:
                     legal = self.game.legal_cards(seat_index)
                     if legal:
-                        self.game.play(seat_index, legal[0].id)
+                        card_id = legal[0].id
+                        if player.blind or not player.opened:
+                            card_id = self.game.token_for(card_id)
+                        self.game.play(seat_index, card_id)
             except GameError:
                 pass
         self.auto_move_task = None

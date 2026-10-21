@@ -19,8 +19,9 @@ TRUMP_CHOICES = (0, 1, 2, 3, NO_TRUMP)  # ♠ ♣ ♦ ♥ без козыря
 
 VIST_PER_BULLET = 10   # одно очко в пуле = 10 вистов
 VIST_PER_MOUNTAIN = 7  # одно очко в горе = 7 вистов
-MOUNTAIN_TO_BULLET_NUM = 7   # очко горы -> 0,7 очка в пули соперников
+MOUNTAIN_TO_BULLET_NUM = VIST_PER_MOUNTAIN   # очко горы -> 0,7 очка в пули соперников
 MOUNTAIN_TO_BULLET_DEN = 10
+BULLET_LENGTHS = (5, 10, 15, 30, 50)  # допустимые длины пули (README)
 CATCH_MIZER_BONUS = 10        # ставка «ловить мизер»
 
 VARIANT_SOCHI = 1
@@ -110,17 +111,29 @@ def whist_requirement(tricks: int, half: bool) -> int:
     return need
 
 
-def whist_reward(tricks: int, half: bool, variant: int) -> int:
+def whist_reward(tricks: int, half: bool) -> int:
+    """Висты за взятый вист.
+
+    Множитель варианта здесь не применяется: в «Ленинграде» удваивается
+    только гора за недобор контракта (README).
+    """
     _need, reward = WHIST_TABLE[tricks]
     if half and tricks in HALF_WHIST_CONTRACTS:
         reward = reward // 2
-    return reward * variant
+    return reward
 
 
-def split_points(total: int, count: int) -> list[int]:
-    """Разложить total очков поровну между count получателями (остаток — первому)."""
+def split_points(total: int, count: int, start: int = 0) -> list[int]:
+    """Разложить total очков поровну между count получателями.
+
+    Остаток распределяется по кругу, начиная с позиции start, чтобы
+    при повторных расчётах он не доставался всегда первому получателю.
+    """
     if count <= 0:
         return []
     base = total // count
     rest = total - base * count
-    return [base + (1 if i < rest else 0) for i in range(count)]
+    return [
+        base + (1 if 0 <= (i - start) % count < rest else 0)
+        for i in range(count)
+    ]

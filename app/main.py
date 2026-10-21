@@ -12,14 +12,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import rules as R
 from .game import (
     GameError,
     PHASE_LOBBY,
     PHASE_MATCH_END,
     PHASE_ROUND_END,
 )
-from .rooms import Connection, Room, RoomManager
+from .rooms import Connection, Room, RoomManager, normalize_options
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -119,13 +118,9 @@ async def handle_create(session: Session, message: dict) -> None:
     name = (message.get("name") or "").strip()[:24] or "Игрок"
     player_id = message.get("player_id") or name
     options = message.get("options") or {}
-    room = manager.create(
-        {
-            "variant": int(options.get("variant", R.VARIANT_SOCHI)),
-            "max_bullet": int(options.get("max_bullet", 30)),
-            "blind": bool(options.get("blind", True)),
-        }
-    )
+    if not isinstance(options, dict):
+        raise GameError("bad_options", "options должен быть объектом.")
+    room = manager.create(options)
     seat = room.add_human(name, player_id)
     room.connections[player_id] = session.conn
     session.player_id = player_id
@@ -239,14 +234,13 @@ async def handle_settings(session: Session, message: dict) -> None:
         raise GameError("no_room", "Вы не в комнате.")
     if room.game is not None and room.game.phase != PHASE_LOBBY:
         raise GameError("in_game", "Настройки меняются только в лобби.")
-    variant = int(message.get("variant", room.options["variant"]))
-    max_bullet = int(message.get("max_bullet", room.options["max_bullet"]))
-    room.options["variant"] = variant if variant in R.VARIANT_NAMES else R.VARIANT_SOCHI
-    room.options["max_bullet"] = max(5, min(50, max_bullet))
-    if "blind" in message:
-        room.options["blind"] = bool(message.get("blind"))
-        if room.game is not None:
-            room.game.blind_allowed = room.options["blind"]
+    merged = dict(room.options)
+    for key in ("variant", "max_bullet", "blind"):
+        if key in message:
+            merged[key] = message[key]
+    room.options = normalize_options(merged)
+    if room.game is not None:
+        room.game.blind_allowed = room.options["blind"]
     await room.broadcast()
 
 
