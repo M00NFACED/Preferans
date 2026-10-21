@@ -187,7 +187,7 @@
     return false;
   }
 
-  const CLIENT_VERSION = "2026-10-21-4";
+  const CLIENT_VERSION = "2026-10-21-5";
 
   function handleMessage(message) {
     switch (message.type) {
@@ -465,12 +465,13 @@
     zone.innerHTML = "";
     const talon = game.talon || [];
     if (!talon.length) {
-      zone.appendChild(el("div", "talon-label", ""));
+      zone.hidden = true;
       return;
     }
+    zone.hidden = false;
     zone.appendChild(el("div", "talon-label", "Прикуп"));
     talon.forEach((card) => {
-      const node = Cards.makeCard(card);
+      const node = Cards.makeCard(card, { size: "lg" });
       node.classList.add("talon-card");
       zone.appendChild(node);
     });
@@ -597,7 +598,9 @@
       case "declare": return game.turn === state.seat ? "Назначьте контракт" : "Назначает контракт " + name;
       case "whist": return game.turn === state.seat ? "Ваш ход: вист или пас" : "Отвечает " + name;
       case "catch_mizer": return game.turn === state.seat ? "Ловить мизер?" : name + " решает";
-      case "playing": return game.turn === state.seat ? "Ваш ход — выберите карту" : "Ходит " + name;
+      case "playing":
+        if (game.pending) return "Взятка разыгрывается…";
+        return game.turn === state.seat ? "Выберите карту из руки" : "Ходит " + name;
       case "whist_mode": return game.turn === state.seat ? "Выберите: вслепую или открыто" : name + " выбирает режим виста";
       case "round_end": return "Раунд завершён";
       case "match_end": return "Матч завершён";
@@ -780,7 +783,7 @@
     }
 
     if (game.phase === "drop" && mine) {
-      const info = el("div", "hint", "Выберите две карты, которые сбросите (" + state.selected.size + "/2)");
+      const info = el("div", "hint", "Выбрано: " + state.selected.size + " из 2");
       box.appendChild(info);
       const drop = el("button", "btn primary", "Сбросить две карты");
       drop.disabled = state.selected.size !== 2;
@@ -824,7 +827,6 @@
     }
 
     if (game.phase === "whist_mode" && mine) {
-      box.appendChild(el("div", "hint", "Как предпочитаете вистовать?"));
       const dark = el("button", "btn", "В тёмную (ставки ×2)");
       dark.onclick = () => send({ type: "whist_mode", dark: true });
       const light = el("button", "btn", "В светлую");
@@ -840,10 +842,6 @@
       no.onclick = () => send({ type: "catch_mizer", accept: false });
       box.appendChild(yes);
       box.appendChild(no);
-    }
-
-    if (game.phase === "playing" && mine) {
-      box.appendChild(el("div", "hint", game.pending ? "Взятка разыгрывается…" : "Выберите карту из руки"));
     }
 
     if (game.phase === "round_end" || game.phase === "match_end") {

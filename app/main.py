@@ -23,7 +23,7 @@ from .rooms import Connection, Room, RoomManager, normalize_options
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
 # Меняем при изменении правил/клиента: клиент предупредит, если сервер старый.
-APP_VERSION = "2026-10-21-4"
+APP_VERSION = "2026-10-21-5"
 
 manager = RoomManager()
 

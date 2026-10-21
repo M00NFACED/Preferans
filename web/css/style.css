@@ -244,7 +244,8 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
   flex: 1; min-height: 0;
   margin: 8px 8px 0;
   border-radius: 24px;
-  display: grid; grid-template-columns: 92px 1fr 92px; gap: 4px;
+  display: grid; grid-template-columns: 92px 1fr 92px;
+  grid-template-rows: minmax(0, 1fr) auto; gap: 4px;
   padding: 10px 8px;
   background:
     radial-gradient(120% 90% at 50% 8%, var(--felt-1) 0%, var(--felt-2) 48%, var(--felt-3) 100%),
@@ -262,12 +263,21 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
   box-shadow: inset 0 0 0 2px rgba(255,255,255,.05);
 }
 
-.player-slot { display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: flex-start; position: relative; z-index: 1; }
+.player-slot {
+  display: flex; flex-direction: column; gap: 6px; align-items: center;
+  justify-content: flex-start; position: relative; z-index: 1;
+}
+.player-slot.left { grid-column: 1; grid-row: 1; }
+.player-slot.right { grid-column: 3; grid-row: 1; }
 .center {
-  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  grid-column: 2; grid-row: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; min-width: 0; position: relative; z-index: 1; height: 100%;
 }
-.center-hint { font-size: 12.5px; color: #cfe3d5; text-align: center; min-height: 17px; text-shadow: 0 1px 3px rgba(0,0,0,.6); flex: 0 0 auto; }
+.center-hint {
+  font-size: 12.5px; font-weight: 600; color: #e2f0e7; text-align: center;
+  min-height: 17px; text-shadow: 0 1px 3px rgba(0,0,0,.6); flex: 0 0 auto;
+}
 
 /* эмблема на сукне */
 .emblem {
@@ -358,12 +368,12 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
 .mini-hand .mini-card.suit-3 { background: repeating-linear-gradient(45deg, #c14a72, #c14a72 2px, #9d3a5a, #9d3a5a 4px); }
 
 /* --- прикуп и взятка */
-.talon-zone { display: flex; align-items: center; gap: 10px; min-height: 44px; }
-.talon-zone .card.talon-card { --cw: 62px; --ch: 89px; }
+.talon-zone { display: flex; align-items: center; gap: 10px; }
+.talon-zone[hidden] { display: none; }
 .talon-label { font-size: 11px; color: #a9c4b2; text-transform: uppercase; letter-spacing: 1px; }
 .trick-area {
   display: flex; align-items: center; justify-content: center; gap: 12px;
-  flex: 1 1 auto; min-height: 116px; width: 100%;
+  flex: 0 0 auto; min-height: 116px; width: 100%;
 }
 .trick-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .trick-slot .who { font-size: 10.5px; color: #b9d0c0; }
@@ -437,6 +447,7 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
 }
 .card.back .idx, .card.back .pip { display: none; }
 
+.card.s-lg { --cw: 84px; --ch: 120px; }
 .card.s-md { --cw: 60px; --ch: 86px; }
 .card.s-sm { --cw: 46px; --ch: 66px; }
 .card.s-xs { --cw: 34px; --ch: 49px; }
@@ -486,8 +497,11 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
   border-color: var(--gold);
   box-shadow: 0 0 0 1px var(--gold), 0 8px 22px rgba(242,193,78,.18);
 }
+.hand-tools {
+  flex: 0 0 auto; display: flex; align-items: stretch; gap: 6px;
+}
 .table-btn {
-  flex: 0 0 58px;
+  flex: 0 0 62px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   padding: 6px 4px; border-radius: 12px; cursor: pointer;
   background: linear-gradient(180deg, #294735, #1f3a2b);
@@ -497,7 +511,10 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
 .table-btn:hover { filter: brightness(1.14); }
 .table-btn:active { transform: translateY(1px); }
 .table-btn-icon { font-size: 20px; line-height: 1; }
-.table-btn-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+.table-btn-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .3px; white-space: nowrap;
+}
 .hand .card { cursor: pointer; }
 .hand .card:hover { transform: translateY(-10px); box-shadow: 0 12px 20px rgba(0,0,0,.45), inset 0 0 0 1px rgba(0,0,0,.1); }
 .hand .card.selected {
@@ -520,10 +537,21 @@ input[type=text]:focus { border-color: var(--gold-2); box-shadow: 0 0 0 3px rgba
 
 /* --- кнопки действий */
 .actions {
+  width: min(620px, calc(100vw - 28px));
+  max-width: 620px; flex: 0 0 auto;
   display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: flex-start;
-  padding: 4px 10px 10px;
-  max-height: 44vh; overflow-y: auto;
+  padding: 2px 10px 8px; margin: 2px 0; position: relative; z-index: 2;
+  max-height: 36vh; overflow-y: auto;
 }
+.actions:not(:empty) {
+  padding: 8px 12px 10px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(5,18,11,.42), rgba(5,18,11,.16));
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 10px 28px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.05);
+  backdrop-filter: blur(2px);
+}
+.actions:empty { display: none; }
 .actions .btn { padding: 10px 15px; font-size: 14px; flex: 0 0 auto; }
 .actions .hint { width: 100%; text-align: center; margin: 0 0 2px; }
 
@@ -669,26 +697,11 @@ table.result td.vists.neg { color: var(--red); }
 
 .confetti { position: fixed; inset: 0; pointer-events: none; z-index: 55; display: none; }
 
-/* плавающая кнопка «шпаргалка» */
-.fab {
-  position: fixed; right: 16px; bottom: 18px; z-index: 40;
-  width: 54px; height: 54px; border-radius: 50%;
-  background: linear-gradient(180deg, #f7d271, var(--gold-2));
-  color: #2a1c06; border: 1px solid #b8871f; cursor: pointer;
-  font-size: 24px; font-weight: 800; font-family: inherit;
-  box-shadow: 0 6px 18px rgba(0,0,0,.45), 0 0 0 4px rgba(242,193,78,.16);
-  transition: transform .12s, box-shadow .15s;
-}
-.fab:hover { transform: scale(1.06); }
-.fab:active { transform: scale(.96); }
-@media (max-width: 520px) {
-  .fab { width: 46px; height: 46px; font-size: 21px; right: 12px; bottom: 12px; }
-}
-
 @media (min-width: 1500px) {
   :root { --cw: 106px; --ch: 152px; }
   body { font-size: 17px; }
   .card { --cw: 106px; --ch: 152px; }
+  .card.s-lg { --cw: 114px; --ch: 163px; }
   .card.s-md { --cw: 84px; --ch: 120px; }
   .card.s-sm { --cw: 62px; --ch: 89px; }
   .card.s-xs { --cw: 44px; --ch: 63px; }
@@ -704,14 +717,14 @@ table.result td.vists.neg { color: var(--red); }
   .opponent .stat { font-size: 13px; }
   .opponent .badge { font-size: 12px; padding: 3px 10px; }
   .mini-hand .mini-card { width: 14px; height: 20px; margin-left: -8px; }
-  .talon-zone .card.talon-card { --cw: 76px; --ch: 109px; }
   .my-info { flex-basis: 112px; }
   .my-info .avatar { width: 38px; height: 38px; font-size: 17px; }
   .my-info .nm { font-size: 14px; }
   .my-info .stat { font-size: 12.5px; }
-  .table-btn { flex-basis: 66px; }
+  .hand-tools { gap: 8px; }
+  .table-btn { flex-basis: 80px; }
   .table-btn-icon { font-size: 24px; }
-  .table-btn-label { font-size: 12px; }
+  .table-btn-label { font-size: 11px; }
   .turn-timer { font-size: 14px; padding: 6px 11px; min-width: 76px; }
   .trick-area { min-height: 150px; gap: 16px; }
   .trick-slot .who { font-size: 12.5px; }
@@ -749,6 +762,7 @@ table.result td.vists.neg { color: var(--red); }
   :root { --cw: 40px; --ch: 58px; }
   .felt { grid-template-columns: 74px 1fr 74px; margin: 6px 6px 0; padding: 8px 4px; }
   .card { --cw: 40px; --ch: 58px; }
+  .card.s-lg { --cw: 44px; --ch: 63px; }
   .card.s-md { --cw: 34px; --ch: 49px; }
   .card.s-sm { --cw: 28px; --ch: 40px; }
   .card.s-xs { --cw: 24px; --ch: 35px; }
@@ -756,7 +770,7 @@ table.result td.vists.neg { color: var(--red); }
   .cheat-grid .card { --cw: 40px; --ch: 58px; }
   .hand-row { gap: 4px; padding: 8px 3px 1px; }
   .hand { gap: 0; padding: 8px 0 4px; justify-content: flex-start; }
-  .hand .card { margin-left: -12px; }
+  .hand .card { margin-left: -24px; }
   .hand .card:first-child { margin-left: 0; }
   .hand .card:hover { transform: translateY(-8px); }
   .hand .card.selected { transform: translateY(-14px); }
@@ -764,12 +778,13 @@ table.result td.vists.neg { color: var(--red); }
   .my-info .avatar { width: 24px; height: 24px; font-size: 11px; margin-bottom: 1px; }
   .my-info .nm { font-size: 9px; }
   .my-info .stat { font-size: 9px; }
-  .table-btn { flex-basis: 40px; padding: 5px 1px; }
+  .hand-tools { gap: 4px; }
+  .table-btn { flex-basis: 42px; padding: 5px 1px; }
   .table-btn-icon { font-size: 17px; }
   .table-btn-label { font-size: 8.5px; }
+  #btn-cheat-fab .table-btn-label { font-size: 7.5px; }
   .turn-timer { min-width: 52px; padding: 3px 6px; font-size: 11px; }
   .talon-zone { gap: 6px; }
-  .talon-zone .card.talon-card { --cw: 44px; --ch: 63px; }
   .trick-area { min-height: 74px; gap: 6px; }
   .plaque { padding: 5px 12px 5px 10px; gap: 8px; }
   .plaque .pl-name { font-size: 16px; }
@@ -779,7 +794,11 @@ table.result td.vists.neg { color: var(--red); }
   .score-chip .sc-name { max-width: 32%; }
   .score-chip { padding: 4px 6px; gap: 4px; }
   .log { max-height: 20vh; }
-  .actions { max-height: 38vh; }
+  .center-hint { font-size: 12px; }
+  .actions { max-height: 38vh; padding: 2px 6px 6px; }
+  .actions:not(:empty) { padding: 7px 8px 8px; border-radius: 14px; }
+  .actions .btn { padding: 8px 11px; font-size: 12.5px; }
+  .actions .hint { font-size: 11.5px; line-height: 1.35; }
   .contract-grid button { padding: 8px 1px; }
   .emblem { font-size: 26vmin; }
   .opponent .avatar { width: 26px; height: 26px; font-size: 12px; }
@@ -794,4 +813,10 @@ table.result td.vists.neg { color: var(--red); }
   .bid-picker .stepper .value { min-width: 120px; font-size: 19px; }
   .bid-picker .stepper .value .n,
   .bid-picker .stepper .value .s { font-size: 21px; }
+}
+
+@media (min-width: 521px) and (max-width: 1150px) {
+  .hand { gap: 0; }
+  .hand .card { margin-left: -24px; }
+  .hand .card:first-child { margin-left: 0; }
 }
