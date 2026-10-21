@@ -87,6 +87,10 @@ class Game:
         blind_allowed: bool = False,
     ):
         self.players = players
+        if variant not in R.VARIANT_NAMES:
+            raise GameError("bad_variant", "Неизвестный вариант игры.")
+        if max_bullet <= 0:
+            raise GameError("bad_bullet", "Длина пули должна быть положительной.")
         self.variant = variant
         self.max_bullet = max_bullet
         self.blind_allowed = blind_allowed
@@ -112,6 +116,7 @@ class Game:
         self.contract: R.Contract | None = None
         self.without_three = False
         self.whist_player: int | None = None
+        self.whist_seats: list[int] = []
         self.half_whist = False
         self.talon: list[C.Card] = []
         self.trick: list[tuple[int, C.Card]] = []
@@ -125,6 +130,11 @@ class Game:
         self.round_history: list[dict] = []
         self.pending = False
         self._rng = random.Random(seed)
+        self._mountain_carry = 0       # дробный остаток перевода горы в пули
+        self._split_offset = 0         # с какого получателя начинать делёж остатка
+        self._card_to_token: dict[int, int] = {}
+        self._token_to_card: dict[int, int] = {}
+        self._display_order: dict[int, list[int]] = {}
 
     # ---------------------------------------------------------------- служебное
 
@@ -142,14 +152,53 @@ class Game:
     def opponents_of(self, seat: int) -> list[int]:
         return [s for s in range(len(self.players)) if s != seat]
 
+    def token_for(self, card_id: int) -> int:
+        """Публичный токен карты для закрытой руки."""
+        return self._card_to_token.get(card_id, card_id)
+
+    def _hidden_hand(self, seat: int) -> list[C.Card]:
+        """Карты закрытой руки в стабильном случайном порядке.
+
+        Обычная рука отсортирована по мастям и рангам; если отдавать её
+        в таком порядке, по позициям можно восстановить часть закрытых карт.
+        """
+        player = self.players[seat]
+        by_id = {card.id: card for card in player.hand}
+        order = self._display_order.get(seat, [])
+        cards = [by_id[cid] for cid in order if cid in by_id]
+        seen = {card.id for card in cards}
+        cards.extend(card for card in player.hand if card.id not in seen)
+        return cards
+
+    def _card_from_client(self, seat: int, value: int) -> C.Card | None:
+        """Находит карту по токену (закрытая рука) или настоящему id."""
+        player = self.players[seat]
+        if player.blind or not player.opened:
+            card_id = self._token_to_card.get(value)
+        else:
+            card_id = value
+        if card_id is None:
+            return None
+        return next((c for c in player.hand if c.id == card_id), None)
+
     def open_hands(self) -> bool:
-        """В мизере карты соперников открыты — так в оригинальной игре."""
-        return self.round_type == ROUND_MIZER
+        """В мизере карты соперников открыты — так в оригинальной игре.
+
+        Во время торга карты ещё закрыты: мизер может быть перебит,
+        а до этого раскрывать руки нельзя.
+        """
+        return self.round_type == ROUND_MIZER and self.phase in (
+            PHASE_DROP,
+            PHASE_CATCH_MIZER,
+            PHASE_PLAYING,
+            PHASE_ROUND_END,
+        )
 
     # ------------------------------------------------------------------ раздача
 
     def start_round(self) -> None:
         self.round_number += 1
+        self.round_type = ""
         self.dealer = (self.dealer + 1) % len(self.players)
         for p in self.players:
             p.hand = []
@@ -174,8 +223,21 @@ class Game:
                 self.players[i % len(self.players)].hand.append(card)
             else:
                 self.talon.append(card)
+        # Непрозрачные токены карт на эту раздачу: клиент не должен получать
+        # настоящие id закрытых карт, иначе слепая игра теряет смысл.
+        self._card_to_token = {}
+        self._token_to_card = {}
+        tokens = self._rng.sample(range(1_000_000, 1_100_000), len(deck))
+        for card, token in zip(deck, tokens):
+            self._card_to_token[card.id] = token
+            self._token_to_card[token] = card.id
         for p in self.players:
             p.hand = C.sort_hand(p.hand)
+        self._display_order = {}
+        for p in self.players:
+            order = [card.id for card in p.hand]
+            self._rng.shuffle(order)
+            self._display_order[p.seat] = order
 
         self.current_bid = None
         self.current_bidder = None
@@ -192,6 +254,7 @@ class Game:
         self.contract = None
         self.without_three = False
         self.whist_player = None
+        self.whist_seats = []
         self.half_whist = False
         self.trick = []
         self.lead_suit = None
@@ -240,7 +303,7 @@ class Game:
         if self.phase != PHASE_AUCTION or self.turn != seat:
             return False
         player = self.players[seat]
-        if player.opened or player.passed:
+        if player.opened or player.passed or player.miser_bid:
             return False
         return True
 
@@ -251,6 +314,10 @@ class Game:
         player = self.players[seat]
         player.opened = True
         player.blind = False
+        if player.blind_bid:
+            # Игрок открылся после слепой заявки: она больше не считается слепой.
+            player.blind_bid = False
+            self._recompute_bid()
         self._log(f"{player.name} открыл карты.")
         # ход остаётся за ним: дальше он заявляет контракт как обычно
 
@@ -296,12 +363,13 @@ class Game:
             self.miser_bid = seat
             self.miser_player = seat
             self.miser_blind = blind
+            self.blind_bidder = None
             player.miser_bid = True
             player.status = STATUS_MIZER
             self.round_type = ROUND_MIZER
             tail = " ВСЛЕПУЮ" if blind else ""
             self._log(f"{player.name}: МИЗЕР{tail}! (её можно перебить заявкой на 9)")
-            self.turn = self._next_active(seat)
+            self._after_auction_step()
             return
 
         if kind != "contract" or contract_index is None:
@@ -327,12 +395,13 @@ class Game:
         self.current_bid = contract_index
         self.current_bidder = seat
         self.current_bid_blind = blind
+        self.blind_bidder = seat if blind else None
         self.auction_passes = 0
         if blind:
             self._log(f"{player.name}: {R.contract_name(contract_index)} ВСЛЕПУЮ!")
         else:
             self._log(f"{player.name}: {R.contract_name(contract_index)}.")
-        self.turn = self._next_active(seat)
+        self._after_auction_step()
 
     def _recompute_bid(self) -> None:
         """Пересчитывает текущую (самую старшую) заявку среди участников торговли."""
@@ -348,10 +417,12 @@ class Game:
             self.current_bid = None
             self.current_bidder = None
             self.current_bid_blind = False
+            self.blind_bidder = None
         else:
             self.current_bid = best_bid
             self.current_bidder = best_seat
             self.current_bid_blind = self.players[best_seat].blind_bid
+            self.blind_bidder = best_seat if self.current_bid_blind else None
 
     def _after_auction_step(self) -> None:
         # торг заканчивается, когда в игре остался один участник
@@ -364,8 +435,13 @@ class Game:
             )
             if has_bid:
                 self._finish_auction(winner)
-            else:
-                self._start_raspas()
+                return
+            if winner is not None:
+                # Последний ещё не сказал ни слова: даём ему ход.
+                # Распасы начинаются только после его паса.
+                self.turn = winner
+                return
+            self._start_raspas()
             return
         self.turn = self._next_active(self.turn)
 
@@ -386,30 +462,39 @@ class Game:
             player.status = STATUS_MIZER
             if self.miser_blind:
                 self.blind_declarer = True
-                player.blind = True
                 self._log(f"{player.name} играет МИЗЕР ВСЛЕПУЮ (ставки удваиваются).")
         else:
             self.round_type = ROUND_CONTRACT
             player.status = STATUS_DECLARER
             if self.current_bid_blind:
                 self.blind_declarer = True
-                player.blind = True
-                self._log(f"{player.name} играет ВСЛЕПУЮ (ставки удваиваются).")
-        # после торга карты открываются всем, кроме слепого заказчика
+                self._log(
+                    f"{player.name}: заявка ВСЛЕПУЮ "
+                    "(ставки удваиваются, карты открываются после торга)."
+                )
+        # после торга каждый видит свои карты; слепая заявка даёт удвоение,
+        # но не заставляет играть вслепую всю раздачу
         for other in self.players:
-            if not other.blind:
-                other.opened = True
+            other.opened = True
+            other.blind = False
         self._log(f"Контракт заказывает {player.name}.")
         self._declarer_takes_talon()
 
     def _declarer_takes_talon(self) -> None:
-        """Заказчик определился: прикуп раскрывают для всех, но в руку он попадёт
-        только после сноса двух карт."""
+        """Заказчик определился: прикуп раскрывают всем и сразу добавляют в руку.
+
+        Снос идёт уже из 12 карт, поэтому заказчик может сбросить карту прикупа.
+        """
         assert self.declarer is not None
         declarer = self.players[self.declarer]
         self.phase = PHASE_DROP
         self.turn = self.declarer
-        self._log(f"{declarer.name} сбрасывает две карты, потом берёт прикуп.")
+        declarer.hand = C.sort_hand(declarer.hand + self.talon)
+        self._log(
+            f"{declarer.name} берёт прикуп: "
+            + ", ".join(f"{C.SUIT_SYMBOL[c.suit]}{c.label}" for c in self.talon)
+        )
+        self._log(f"{declarer.name} сбрасывает две карты.")
 
     def _start_raspas(self) -> None:
         self.round_type = ROUND_RASPAS
@@ -438,18 +523,14 @@ class Game:
         hand = self.players[seat].hand
         chosen = []
         for cid in ids:
-            found = next((c for c in hand if c.id == cid), None)
+            found = self._card_from_client(seat, cid)
             if found is None:
                 raise GameError("bad_drop", "Такой карты нет на руках.")
             chosen.append(found)
         for card in chosen:
             hand.remove(card)
-        # только теперь прикуп уходит заказчику в руку
         declarer = self.players[seat]
-        if self.talon:
-            declarer.hand = C.sort_hand(declarer.hand + self.talon)
-            self._log(f"{declarer.name} берёт прикуп: "
-                      + ", ".join(f"{C.SUIT_SYMBOL[c.suit]}{c.label}" for c in self.talon))
+        # прикуп уже лежит в руке; после сноса его больше не показываем отдельно
         self.talon = []
         declarer.hand = C.sort_hand(declarer.hand)
         self._log(f"{declarer.name} сбросил две карты.")
@@ -494,6 +575,8 @@ class Game:
     def can_whist(self, seat: int, kind: str) -> tuple[bool, str]:
         if self.phase != PHASE_WHIST or self.turn != seat:
             return False, "Не ваш ход."
+        if kind not in ("vist", "half", "pass"):
+            return False, "Неизвестный ответ на вист."
         if kind == "half":
             if self.contract is None or self.contract.tricks not in R.HALF_WHIST_CONTRACTS:
                 return False, "Полвиста доступен только для контрактов 6 и 7."
@@ -510,6 +593,8 @@ class Game:
         player.status = STATUS_VIST if kind in ("vist", "half") else STATUS_PASS
         if kind in ("vist", "half"):
             self.whist_player = seat
+            if seat not in self.whist_seats:
+                self.whist_seats.append(seat)
             self.half_whist = kind == "half"
             self._log(f"{player.name}: {'полвиста' if kind == 'half' else 'вист'}.")
         else:
@@ -545,7 +630,9 @@ class Game:
         player = self.players[seat]
         player.catch_mizer = accept
         self._log(f"{player.name} {'ловит мизер' if accept else 'не ловит мизер'}.")
-        if all(self.players[s].catch_mizer is not None for s in self.opponents_of(self.miser_player or 0)):
+        if self.miser_player is None:
+            raise GameError("bad_phase", "Мизер не объявлен.")
+        if all(self.players[s].catch_mizer is not None for s in self.opponents_of(self.miser_player)):
             self._start_playing()
         else:
             self.turn = self.next_seat(seat)
@@ -598,7 +685,7 @@ class Game:
         if self.turn != seat:
             raise GameError("not_your_turn", "Не ваш ход.")
         player = self.players[seat]
-        card = next((c for c in player.hand if c.id == card_id), None)
+        card = self._card_from_client(seat, card_id)
         if card is None:
             raise GameError("no_card", "Такой карты нет на руках.")
         allowed = {c.id for c in self.legal_cards(seat)}
@@ -659,15 +746,26 @@ class Game:
         иначе одна катастрофическая ошибка обнуляет весь матч.
         """
         points = min(points, self.max_bullet)
-        for seat, share in zip(seats, R.split_points(points, len(seats))):
+        shares = R.split_points(points, len(seats), self._split_offset)
+        self._split_offset = (self._split_offset + 1) % max(1, len(seats))
+        for seat, share in zip(seats, shares):
             if share <= 0:
                 continue
-            self.players[seat].bullet += share
-            self.players[seat].vists += share * R.VIST_PER_BULLET
+            player = self.players[seat]
+            room = max(0, self.max_bullet - player.bullet)
+            fit = min(share, room)
+            player.bullet += fit
+            player.vists += fit * R.VIST_PER_BULLET
 
     def _mountain_to_points(self, mountain: int) -> int:
-        """Очко горы превращается в очки в чужих пулях (7 вистов за очко горы)."""
-        return (mountain * R.MOUNTAIN_TO_BULLET_NUM) // R.MOUNTAIN_TO_BULLET_DEN
+        """Очко горы превращается в 0,7 очка в чужих пулях (7 вистов за очко).
+
+        Дробный остаток копится между расчётами, иначе мелкие штрафы
+        (1-2 очка горы) полностью исчезали бы из-за округления вниз.
+        """
+        total = mountain * R.MOUNTAIN_TO_BULLET_NUM + self._mountain_carry
+        points, self._mountain_carry = divmod(total, R.MOUNTAIN_TO_BULLET_DEN)
+        return points
 
     def settle_round(self) -> None:
         result = {"round": self.round_number, "type": self.round_type, "lines": []}
@@ -720,8 +818,8 @@ class Game:
                 f"Контракт {self.contract.name} сыгран ({declarer.tricks} взяток): "
                 f"{base - overflow} в пулю, {(base - overflow) * R.VIST_PER_BULLET} вистов."
             )
-            if self.contract.tricks == 7:
-                self.rasspas_series = 1
+            # амнистия распасов: любой сыгранный контракт сбрасывает серию
+            self.rasspas_series = 1
         else:
             deficit = n - declarer.tricks
             mountain = deficit * R.mountain_per_trick(n, self.variant) * mult
@@ -733,35 +831,52 @@ class Game:
                 f"{mountain} в гору, {points} в пули соперникам."
             )
 
-        if self.whist_player is not None:
-            w = self.players[self.whist_player]
-            need = R.whist_requirement(n, self.half_whist)
-            wmult = 2 if self.blind_whist else 1
+        for wseat in self.whist_seats:
+            w = self.players[wseat]
+            half = w.whist_kind == "half"
+            need = R.whist_requirement(n, half)
+            wmult = 2 if w.blind else 1
+            label = "полвиста" if half else "вист"
             if w.tricks >= need:
-                reward = R.whist_reward(n, self.half_whist, self.variant) * wmult
+                reward = R.whist_reward(n, half) * wmult
                 w.vists += reward
                 declarer.vists -= reward
-                result["lines"].append(f"{w.name} взял вист: {reward} вистов.")
+                result["lines"].append(f"{w.name} взял {label}: {reward} вистов.")
             else:
                 missing = need - w.tricks
                 mountain = missing * R.mountain_per_trick(n, self.variant) * wmult
                 w.mountain += mountain
                 points = self._mountain_to_points(mountain)
-                self._write_own_bullet(d, points)
+                overflow = self._write_own_bullet(d, points)
+                credited = points - overflow
+                tail = f", {credited} в пулю заказчику." if credited else "."
                 result["lines"].append(
-                    f"{w.name} не добрал вист ({w.tricks} из {need}): {mountain} в гору."
+                    f"{w.name} не добрал {label} ({w.tricks} из {need}): "
+                    f"{mountain} в гору{tail}"
                 )
 
         if self.without_three:
+            bonus = R.WITHOUT_THREE_BULLET * mult
             if declarer.tricks <= 2:
-                overflow = self._write_own_bullet(d, R.WITHOUT_THREE_BULLET)
-                result["lines"].append("«Без 3 взяток» выполнено: +2 в пулю.")
+                overflow = self._write_own_bullet(d, bonus)
+                if overflow > 0:
+                    self._write_others_bullet(others, overflow)
+                credited = bonus - overflow
+                result["lines"].append(
+                    f"«Без 3 взяток» выполнено: +{credited} в пулю."
+                )
             else:
-                mountain = R.WITHOUT_THREE_BULLET * R.mountain_per_trick(n, self.variant)
+                mountain = (
+                    R.WITHOUT_THREE_BULLET
+                    * R.mountain_per_trick(n, self.variant)
+                    * mult
+                )
                 declarer.mountain += mountain
                 points = self._mountain_to_points(mountain)
                 self._write_others_bullet(others, points)
-                result["lines"].append("«Без 3 взяток» не выполнено.")
+                result["lines"].append(
+                    f"«Без 3 взяток» не выполнено: {mountain} в гору."
+                )
 
     def _settle_mizer(self, result: dict) -> None:
         assert self.miser_player is not None
@@ -781,7 +896,7 @@ class Game:
             )
             self.rasspas_series = 1
         else:
-            mountain = miser.tricks * R.MIZER_MOUNTAIN_PER_TRICK * self.variant
+            mountain = miser.tricks * R.MIZER_MOUNTAIN_PER_TRICK
             miser.mountain += mountain
             points = self._mountain_to_points(mountain)
             self._write_others_bullet(others, points)
@@ -801,7 +916,8 @@ class Game:
             if player.tricks > 0:
                 mountain = player.tricks * cost
                 player.mountain += mountain
-                self._write_others_bullet(self.opponents_of(seat), mountain)
+                # По правилам чужие пули за распасы не пополняются:
+                # в пулю пишет только тот, кто не взял ни одной взятки.
                 result["lines"].append(
                     f"{player.name}: {player.tricks} взяток — {mountain} в гору."
                 )
@@ -866,13 +982,14 @@ class Game:
             "blind_bidder": self.blind_bidder,
             "current_bid_blind": self.current_bid_blind,
             "whist_player": self.whist_player,
+            "whist_seats": list(self.whist_seats),
             "half_whist": self.half_whist,
             "blind_allowed": self.blind_allowed,
             "current_bid": self.current_bid,
             "current_bid_name": R.contract_name(self.current_bid) if self.current_bid is not None else None,
             "current_bidder": self.current_bidder,
             "auction_passes": self.auction_passes,
-            # прикуп раскрывают только на этапе сноса — и сразу после этого он уходит в руку
+            # прикуп показывают на сносе; в руку он уже добавлен, чтобы его можно было сбросить
             "talon": [c.to_dict() for c in self.talon] if self.phase == PHASE_DROP else [],
             "trick": [{"seat": s, "card": c.to_dict()} for s, c in self.trick],
             "pending": self.pending,
@@ -889,11 +1006,18 @@ class Game:
             view["blind"] = player.blind
             view["opened"] = player.opened
             if player.blind or not player.opened:
-                # карты не открыты — показываем только рубашки
-                view["hand"] = [{"id": c.id, "blind": True} for c in player.hand]
+                # карты не открыты — показываем только рубашки с непрозрачными токенами
+                view["hand"] = [
+                    {"id": self.token_for(c.id), "blind": True}
+                    for c in self._hidden_hand(seat)
+                ]
+                # порядок legal не должен выдавать порядок карт в руке
+                view["legal"] = sorted(
+                    self.token_for(c.id) for c in self.legal_cards(seat)
+                )
             else:
                 view["hand"] = [c.to_dict() for c in player.hand]
-            view["legal"] = [c.id for c in self.legal_cards(seat)]
+                view["legal"] = [c.id for c in self.legal_cards(seat)]
             view["available_bids"] = self.available_bids()
             view["can_miser"] = self.can_declare_miser(seat)
             view["can_bid_blind"] = self.can_bid_blind(seat)

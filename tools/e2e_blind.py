@@ -81,18 +81,21 @@ def main() -> int:
             check(game["phase"] == "auction", "идёт торг")
             check(game.get("can_bid_blind") is True, "слепая заявка доступна")
 
-            # слепая заявка на 6 пик
-            session.send({"type": "bid", "kind": "contract", "contract": 0, "blind": True})
+            # максимальная слепая заявка: боты уже не смогут её перебить
+            session.send({"type": "bid", "kind": "contract", "contract": 24, "blind": True})
             message = session.wait_for(lambda m: m.get("game") and m["game"]["phase"] == "auction")
             game = message["game"]
-            check(game["current_bid"] == 0, "заявка принята как 6 пик")
-            check(game["blind_bidder"] is not None or game.get("blind_declarer") is not None,
-                  "заявка отмечена как слепая")
+            check(game["current_bid"] == 24, "заявка принята как 10 б/к")
+            check(game.get("blind_bidder") is not None,
+                  "заявка отмечена как слепая (blind_bidder)")
+            check(all("suit" not in c for c in (game.get("hand") or []) if c.get("blind")),
+                  "закрытые карты не раскрывают масть и ранг")
             available = game.get("available_bids") or []
-            check(all(__import__("app.rules", fromlist=["R"]).CONTRACTS[i].tricks == 7 for i in available),
-                  "слепую заявку можно перебить только заявкой на 7")
+            check(not available, "максимальную заявку перебить нечем")
 
             # играем раунд до конца
+            checked_drop = False
+            checked_after_drop = False
             for step in range(200):
                 message = session.pump()
                 if message.get("type") == "error":
@@ -108,6 +111,10 @@ def main() -> int:
                       f"взятка={len(game.get('trick') or [])} pending={game.get('pending')}")
                 if game["phase"] in ("round_end", "match_end"):
                     break
+                if checked_drop and not checked_after_drop and game["phase"] in ("declare", "whist"):
+                    check(len(game.get("hand") or []) == 10, "после сноса осталось 10 карт")
+                    check(not game.get("talon"), "после сноса прикуп больше не показывается")
+                    checked_after_drop = True
                 if game.get("turn") != message.get("you"):
                     continue
                 phase = game["phase"]
@@ -119,7 +126,25 @@ def main() -> int:
                         session.send({"type": "bid", "kind": "pass"})
                 elif phase == "drop":
                     hand = game.get("hand") or []
+                    hand_ids = [c["id"] for c in hand]
+                    talon_ids = [c["id"] for c in (game.get("talon") or [])]
+                    if not checked_drop:
+                        check(game.get("blind") is False,
+                              "после торга карты заказчика открыты")
+                        check(game.get("opened") is True,
+                              "после торга заказчик видит свою руку")
+                        check(len(hand_ids) == 12,
+                              "на сносе 12 карт (10 + прикуп)")
+                        check(all("suit" in c for c in hand),
+                              "карты в руке открыты, а не токены")
+                        check(set(talon_ids) <= set(hand_ids),
+                              "прикуп добавлен в руку до сноса")
+                        checked_drop = True
                     ids = [c["id"] for c in hand[:2]]
+                    if talon_ids:
+                        other = next((cid for cid in hand_ids if cid != talon_ids[0]), None)
+                        if other is not None:
+                            ids = [talon_ids[0], other]
                     session.send({"type": "drop", "cards": ids})
                 elif phase == "declare":
                     session.send({"type": "declare", "contract": game.get("current_bid") or 0})
@@ -138,10 +163,18 @@ def main() -> int:
 
             game = session.state["game"]
             check(game["phase"] in ("round_end", "match_end"), "раунд доигран")
-            check(game.get("blind_declarer") is True, "заказчик играл вслепую")
+            check(game.get("blind_declarer") is True, "заявка была слепой (blind_declarer)")
+            check(game.get("blind") is False, "после торга заказчик играл с открытыми картами")
+            check(checked_drop, "снос заказчика был в тесте")
             result = game.get("last_result") or {}
             check("вслепую" in (result.get("contract") or "").lower(),
                   "в итогах отмечено «вслепую»")
+            if result.get("made") is True:
+                tricks = (game.get("contract") or {}).get("tricks", 0)
+                expected = min(game["max_bullet"], (tricks - 5) * 2 * 2)
+                actual = game["players"][game["you"]]["bullet"]
+                check(actual == expected,
+                      f"слепая премия удвоена: {actual} (ожидалось {expected})")
             check(not session.errors, "ошибок нет: " + str(session.errors))
 
     print()

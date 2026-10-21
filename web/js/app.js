@@ -40,6 +40,7 @@
     resuming: false,
     animSeen: new Set(),
     animRound: -1,
+    handAnimKey: null,
     blindBid: false
   };
 
@@ -298,6 +299,7 @@
       if (game.phase === "playing") Sound.play("deal");
     }
 
+    $("top-code").textContent = (state.room && state.room.code) || "-----";
     $("top-round").textContent = "Раунд " + game.round;
     $("top-contract").textContent = game.contract
       ? game.contract.name + (game.without_three ? " · без 3 взяток" : "")
@@ -369,7 +371,7 @@
     if (open) {
       open.forEach((card) => {
         const m = el("div", "mini-card suit-" + card.suit);
-        m.title = Cards.RANK_LABEL[card.rank] + SUIT_SYMBOL[card.suit];
+        m.title = Cards.rankLabel(card.rank) + SUIT_SYMBOL[card.suit];
         mini.appendChild(m);
       });
     } else {
@@ -470,6 +472,9 @@
     const legal = new Set(game.legal || []);
     const dropping = game.can_drop;
     const handCards = game.hand || [];
+    // Анимация раздачи — один раз на раздачу, а не на каждое обновление состояния.
+    const handAnimKey = (state.roomCode || "") + ":" + game.round;
+    const animateHand = state.handAnimKey !== handAnimKey;
 
     handCards.forEach((card, index) => {
       const trump = trumpOf(game);
@@ -478,8 +483,10 @@
       const node = hidden
         ? Cards.makeCard({ id: card.id, suit: 0, rank: 7 }, { size: "lg", faceDown: true })
         : Cards.makeCard(card, { size: "lg", trump: isTrump });
-      node.classList.add("dealing");
-      node.style.animationDelay = (index * 45) + "ms";
+      if (animateHand) {
+        node.classList.add("dealing");
+        node.style.animationDelay = (index * 45) + "ms";
+      }
       if (hidden) node.title = "карта закрыта";
       if (dropping) {
         if (state.selected.has(card.id)) node.classList.add("selected");
@@ -501,6 +508,7 @@
       }
       hand.appendChild(node);
     });
+    if (animateHand && handCards.length) state.handAnimKey = handAnimKey;
   }
 
   function hintFor(game) {
@@ -774,9 +782,9 @@
     <p>Игроки по очереди (от сдатчика) называют контракт или пасуют. Заявка должна быть
     выше предыдущей. Лестница контрактов — 25 штук:</p>
     <p><b>6 пик → 6 треф → 6 бубн → 6 червей → 6 без козыря → 7 пик → … → 10 без козыря.</b></p>
-    <p>Козырь — это масть контракта. Торг заканчивается, когда два игрока подряд пасуют.
-    Если пасуют все трое — играются распасы (без козыря, каждый играет за себя и старается
-    взять как можно меньше взяток).</p>
+    <p>Козырь — это масть контракта. Торг заканчивается, когда все, кроме одного игрока,
+    спасуют. Если пасуют все трое — играются распасы (без козыря, каждый играет за себя
+    и старается взять как можно меньше взяток).</p>
     <p>Отдельно можно взять <b>мизер</b> — не взять ни одной взятки. Мизер доступен,
     пока текущая заявка не выше 8 взяток.</p>
 
@@ -808,12 +816,15 @@
     <ul>
       <li>Сыгранный контракт N взяток: <b>(N−5)×2</b> очка пишутся в вашу же пулю. Очко в пуле = <b>10 вистов</b>.</li>
       <li>Недобранная взятка: <b>(N−5)×2</b> (в варианте «Ленинград» ×2) очка в гору, соперникам идут очки в их пули.</li>
-      <li>Вист: успех — висты по таблице выше, провал — очки в гору, заказчик получает компенсацию в свою пулю.</li>
+      <li>Вист: успех — висты по таблице выше, провал — очки в гору, заказчик получает компенсацию в свою пулю.
+      Если вистуют оба соперника, каждый рассчитывается отдельно.</li>
       <li>Мизер: сыгран — 10 очков в пулю; каждая взятая взятка — 10 в гору.</li>
-      <li>Распасы: каждая взятка — очко в гору (штраф растёт: 1, 2, 3), кто не взял ни одной — пишет очко в свою пулю.</li>
+      <li>Распасы: каждая взятка — очко в гору (штраф растёт: 1, 2, 3), кто не взял ни одной — пишет очко в свою пулю.
+      Любой сыгранный контракт сбрасывает серию распасов (амнистия).</li>
     </ul>
     <p><b>Конец матча:</b> в варианте «Сочи» — когда у всех пуля заполнена; в «Ленинграде» — когда
-    сумма очков в пулях всех игроков не меньше длины пули × 3. Побеждает тот, у кого больше вистов.</p>
+    сумма очков в пулях всех игроков не меньше длины пули × 3. Побеждает тот, у кого больше вистов.
+    Висты могут быть отрицательными — это долг игрока.</p>
 
     <h3>Управление</h3>
     <p>Все действия — мышью или касанием. Если связь пропала, игра не сломается: клиент

@@ -85,7 +85,8 @@ async def main() -> int:
     check(ok and a.state["game"]["phase"] == "auction", "идёт торг")
 
     # каждый по очереди пасует / называет контракт
-    for step in range(150):
+    # запас шагов: боты ходят с задержкой, а взятка показывается 2.6 с
+    for step in range(400):
         game = a.state["game"]
         if game["phase"] in ("round_end", "match_end"):
             break
