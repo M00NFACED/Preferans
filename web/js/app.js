@@ -187,7 +187,7 @@
     return false;
   }
 
-  const CLIENT_VERSION = "2026-10-21-5";
+  const CLIENT_VERSION = "2026-10-21-6";
 
   function handleMessage(message) {
     switch (message.type) {
