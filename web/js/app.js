@@ -41,7 +41,12 @@
     animSeen: new Set(),
     animRound: -1,
     handAnimKey: null,
-    blindBid: false
+    blindBid: false,
+    auctionIndex: null,
+    auctionKey: null,
+    modalKind: null,
+    mizerBlind: false,
+    turnTimerEnd: 0
   };
 
   const $ = (id) => document.getElementById(id);
@@ -95,6 +100,44 @@
     if (node) node.textContent = text || "";
   }
 
+  // ------------------------------------------------------------------ таймер хода
+  function updateTurnTimer() {
+    const node = $("turn-timer");
+    if (!node) return;
+    const game = state.game;
+    if (!game || !state.turnTimerEnd || game.turn === null || game.turn === undefined) {
+      node.hidden = true;
+      return;
+    }
+    const player = (game.players || [])[game.turn];
+    if (!player || player.is_bot || game.phase === "round_end" || game.phase === "match_end") {
+      node.hidden = true;
+      return;
+    }
+    const left = Math.max(0, Math.ceil((state.turnTimerEnd - Date.now()) / 1000));
+    const minutes = Math.floor(left / 60);
+    const seconds = String(left % 60).padStart(2, "0");
+    node.hidden = false;
+    node.textContent = "⏱ " + minutes + ":" + seconds;
+    node.classList.toggle("mine", game.turn === state.seat);
+    node.classList.toggle("urgent", left <= 30);
+  }
+
+  function syncTurnTimer(game) {
+    // Опираемся на серверное «осталось секунд», а не на абсолютные часы:
+    // у клиента и сервера может различаться системное время.
+    if (!game) {
+      state.turnTimerEnd = 0;
+    } else if (game.turn_time_left !== undefined && game.turn_time_left !== null) {
+      state.turnTimerEnd = Date.now() + Number(game.turn_time_left) * 1000;
+    } else if (game.turn_deadline) {
+      state.turnTimerEnd = Number(game.turn_deadline) * 1000;
+    } else {
+      state.turnTimerEnd = 0;
+    }
+    updateTurnTimer();
+  }
+
   // ------------------------------------------------------------------ сеть
   function wsUrl() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -144,7 +187,7 @@
     return false;
   }
 
-  const CLIENT_VERSION = "2026-10-20-3";
+  const CLIENT_VERSION = "2026-10-21-4";
 
   function handleMessage(message) {
     switch (message.type) {
@@ -286,7 +329,15 @@
   // ------------------------------------------------------------------ игровой стол
   function renderGame() {
     const game = state.game;
-    if (!game) return;
+    if (!game) {
+      syncTurnTimer(null);
+      return;
+    }
+    syncTurnTimer(game);
+    if (state.modalKind === "mizer" &&
+        !(game.phase === "auction" && game.turn === state.seat)) {
+      closeModal();
+    }
 
     if (game.phase !== state.lastPhase) {
       if (game.phase === "declare") {
@@ -317,6 +368,7 @@
     renderTrick(game);
     $("center-hint").textContent = hintFor(game);
 
+    renderMyInfo(game);
     renderHand(game);
     renderActions(game);
     renderLog(game);
@@ -417,7 +469,30 @@
       return;
     }
     zone.appendChild(el("div", "talon-label", "Прикуп"));
-    talon.forEach((card) => zone.appendChild(Cards.makeCard(card, { size: "sm" })));
+    talon.forEach((card) => {
+      const node = Cards.makeCard(card);
+      node.classList.add("talon-card");
+      zone.appendChild(node);
+    });
+  }
+
+  function renderMyInfo(game) {
+    const box = $("my-info");
+    box.innerHTML = "";
+    const players = game.players || [];
+    const me = players[state.seat];
+    if (!me) return;
+    if (game.turn === state.seat) box.classList.add("turn");
+    else box.classList.remove("turn");
+
+    box.appendChild(el("div", "avatar", (me.name || "?").trim().charAt(0).toUpperCase()));
+    box.appendChild(el("div", "nm", me.name || "Вы"));
+    box.appendChild(el("div", "stat", "взяток: " + me.tricks));
+    const status = (["playing", "round_end", "match_end"].indexOf(game.phase) >= 0
+      ? STATUS_LABEL_PLAY : STATUS_LABEL)[me.status] || "";
+    if (status && status !== "заказчик") {
+      box.appendChild(el("div", "stat", status));
+    }
   }
 
   function renderTrick(game) {
@@ -530,6 +605,85 @@
     return "";
   }
 
+  // ------------------------------------------------------------------ окна и таблица счёта
+  function buildScoreTable(game) {
+    const players = (game.players || []).slice().sort((a, b) => b.vists - a.vists);
+    const table = el("table", "result score-table");
+    const thead = el("thead");
+    const hrow = el("tr");
+    ["Игрок", "Взятки", "Пуля", "Гора", "Висты"].forEach((title) => {
+      hrow.appendChild(el("th", null, title));
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+    const tbody = el("tbody");
+    const best = players.length ? players[0].vists : 0;
+    players.forEach((player) => {
+      const row = el("tr");
+      if (player.vists === best) row.classList.add("win");
+      const name = player.name + (player.seat === state.seat ? " (вы)" : "");
+      row.appendChild(el("td", "name", name));
+      row.appendChild(el("td", null, String(player.tricks)));
+      row.appendChild(el("td", null, String(player.bullet)));
+      row.appendChild(el("td", null, String(player.mountain)));
+      row.appendChild(el("td", "vists " + (player.vists > 0 ? "pos" : player.vists < 0 ? "neg" : ""),
+        String(player.vists)));
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function openModal(title, body, kind) {
+    state.modalKind = kind || null;
+    $("modal-title").textContent = title;
+    const holder = $("modal-body");
+    holder.innerHTML = "";
+    if (body) holder.appendChild(body);
+    $("modal-layer").hidden = false;
+  }
+
+  function closeModal() {
+    $("modal-layer").hidden = true;
+    state.modalKind = null;
+    state.mizerBlind = false;
+  }
+
+  function openMizerConfirm(blind) {
+    state.mizerBlind = !!blind;
+    const wrap = el("div");
+    const copy = el("p", "modal-copy");
+    copy.textContent = blind
+      ? "Вы хотите объявить мизер вслепую. Карты останутся закрытыми до конца торгов, " +
+        "а взять нельзя ни одной взятки."
+      : "Вы хотите объявить мизер. Нужно не взять ни одной взятки за раздачу.";
+    wrap.appendChild(copy);
+    wrap.appendChild(el("p", "hint",
+      "Мизер можно перебить заявкой на 9 взяток и выше."));
+    const actions = el("div", "modal-actions");
+    const cancel = el("button", "btn", "Отмена");
+    cancel.onclick = () => closeModal();
+    const confirm = el("button", "btn primary", "Взять мизер");
+    confirm.onclick = () => {
+      Sound.play("bid");
+      send({ type: "bid", kind: "miser", blind: state.mizerBlind });
+      closeModal();
+    };
+    actions.appendChild(cancel);
+    actions.appendChild(confirm);
+    wrap.appendChild(actions);
+    openModal("Подтверждение мизера", wrap, "mizer");
+  }
+
+  function openScores() {
+    if (!state.game) return;
+    const wrap = el("div");
+    wrap.appendChild(el("p", "hint",
+      "Текущий счёт: пуля, гора и висты. Очко в пуле = 10 вистов."));
+    wrap.appendChild(buildScoreTable(state.game));
+    openModal("Таблица счёта", wrap, "scores");
+  }
+
   // ------------------------------------------------------------------ действия
   function renderActions(game) {
     const box = $("actions");
@@ -538,52 +692,91 @@
 
     if (game.phase === "auction" && mine) {
       const closed = !game.opened;
-      const grid = el("div", "contract-grid");
-      const available = new Set(game.available_bids || []);
-      for (let i = 0; i < 25; i++) {
-        const btn = el("button", null);
-        const n = 6 + Math.floor(i / 5);
-        const s = i % 5;
-        btn.appendChild(el("span", "n", String(n)));
-        const suit = el("span", "s suit-" + s, CONTRACT_SUITS[s]);
-        btn.appendChild(suit);
-        btn.title = CONTRACT_NAMES[i];
-        btn.disabled = !available.has(i);
-        btn.onclick = () => {
-          Sound.play("bid");
-          send({ type: "bid", kind: "contract", contract: i, blind: closed });
-        };
-        grid.appendChild(btn);
+      const available = (game.available_bids || []).slice().sort((a, b) => a - b);
+      const key = [
+        game.round, game.turn, game.current_bid, game.opened,
+        game.can_bid_blind, available.join(",")
+      ].join("|");
+      if (state.auctionKey !== key) {
+        state.auctionKey = key;
+        state.auctionIndex = available.length ? available[0] : null;
       }
-      const gridWrap = el("div", "grid-wrap");
-      gridWrap.appendChild(grid);
-      box.appendChild(gridWrap);
+      if (state.auctionIndex === null || available.indexOf(state.auctionIndex) < 0) {
+        state.auctionIndex = available.length ? available[0] : null;
+      }
+
+      const picker = el("div", "bid-picker");
+      const stepper = el("div", "stepper");
+      const minus = el("button", "btn", "−");
+      const index = state.auctionIndex;
+      const pos = index === null ? -1 : available.indexOf(index);
+      minus.disabled = pos <= 0;
+      minus.onclick = () => {
+        if (pos > 0) {
+          state.auctionIndex = available[pos - 1];
+          renderActions(game);
+        }
+      };
+      const plus = el("button", "btn", "+");
+      plus.disabled = pos < 0 || pos >= available.length - 1;
+      plus.onclick = () => {
+        if (pos >= 0 && pos < available.length - 1) {
+          state.auctionIndex = available[pos + 1];
+          renderActions(game);
+        }
+      };
+      const value = el("div", "value");
+      if (index === null) {
+        value.textContent = "нет ставок";
+      } else {
+        value.appendChild(el("span", "n", String(6 + Math.floor(index / 5))));
+        value.appendChild(el("span", "s suit-" + (index % 5), CONTRACT_SUITS[index % 5]));
+        value.title = CONTRACT_NAMES[index];
+      }
+      stepper.appendChild(minus);
+      stepper.appendChild(value);
+      stepper.appendChild(plus);
+      picker.appendChild(stepper);
+      if (available.length > 1) {
+        picker.appendChild(el("div", "hint",
+          "Ставка " + (pos + 1) + " из " + available.length + " доступных"));
+      }
+      box.appendChild(picker);
 
       if (closed) {
-        box.appendChild(el("div", "hint", "У вас закрытые карты. Можно заявить контракт вслепую, " +
-          "взять мизер вслепую или открыть карты и торговаться как обычно."));
+        const hint = game.can_bid_blind
+          ? "У вас закрытые карты. Можно заявить контракт вслепую, " +
+            "взять мизер вслепую или открыть карты и торговаться как обычно."
+          : "Слепую заявку сейчас перебить нельзя — сначала откройте карты.";
+        box.appendChild(el("div", "hint", hint));
       }
+
+      const row = el("div", "bid-actions");
+      const bid = el("button", "btn primary", "Сделать ставку");
+      bid.disabled = index === null || (closed && !game.can_bid_blind);
+      bid.onclick = () => {
+        if (index === null) return;
+        Sound.play("bid");
+        send({ type: "bid", kind: "contract", contract: index, blind: closed });
+      };
+      row.appendChild(bid);
 
       const pass = el("button", "btn", "Пас");
       pass.onclick = () => { Sound.play("bid"); send({ type: "bid", kind: "pass" }); };
-      box.appendChild(pass);
+      row.appendChild(pass);
 
       if (game.can_miser) {
         const miser = el("button", "btn", closed ? "Мизер вслепую" : "Мизер");
-        miser.onclick = () => {
-          if (confirm("Взять мизер? Нельзя взять ни одной взятки.")) {
-            Sound.play("bid");
-            send({ type: "bid", kind: "miser", blind: closed });
-          }
-        };
-        box.appendChild(miser);
+        miser.onclick = () => openMizerConfirm(closed);
+        row.appendChild(miser);
       }
 
       if (game.can_open) {
         const open = el("button", "btn primary", "Открыть карты");
         open.onclick = () => { Sound.play("deal"); send({ type: "open_cards" }); };
-        box.appendChild(open);
+        row.appendChild(open);
       }
+      box.appendChild(row);
     }
 
     if (game.phase === "drop" && mine) {
@@ -700,27 +893,7 @@
       body.appendChild(lines);
     }
 
-    const players = (game.players || []).slice().sort((a, b) => b.vists - a.vists);
-    const table = el("table", "result");
-    const thead = el("thead");
-    const hrow = el("tr");
-    ["Игрок", "Взятки", "Пуля", "Гора", "Висты"].forEach((title) => hrow.appendChild(el("th", null, title)));
-    thead.appendChild(hrow);
-    table.appendChild(thead);
-    const tbody = el("tbody");
-    const best = players.length ? players[0].vists : 0;
-    players.forEach((player) => {
-      const row = el("tr");
-      if (player.vists === best) row.classList.add("win");
-      row.appendChild(el("td", "name", player.name));
-      row.appendChild(el("td", null, String(player.tricks)));
-      row.appendChild(el("td", null, String(player.bullet)));
-      row.appendChild(el("td", null, String(player.mountain)));
-      row.appendChild(el("td", "vists " + (player.vists > 0 ? "pos" : player.vists < 0 ? "neg" : ""), String(player.vists)));
-      tbody.appendChild(row);
-    });
-    table.appendChild(tbody);
-    body.appendChild(table);
+    body.appendChild(buildScoreTable(game));
 
     const note = el("div", "hint",
       "Вариант: " + game.variant_name + " · длина пули " + game.max_bullet +
@@ -1104,6 +1277,14 @@
     };
 
     $("log-head").onclick = () => $("log-box").classList.toggle("collapsed");
+    $("btn-scores").onclick = openScores;
+    $("modal-close").onclick = closeModal;
+    $("modal-layer").onclick = (event) => {
+      if (event.target === $("modal-layer")) closeModal();
+    };
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !$("modal-layer").hidden) closeModal();
+    });
   }
 
   // ------------------------------------------------------------------ старт
@@ -1112,9 +1293,9 @@
   renderRules();
   renderHome();
   showScreen("home");
-  if (window.innerWidth < 560) $("log-box").classList.add("collapsed");
   $("btn-sound").classList.toggle("off", !Sound.enabled);
   $("btn-sound").textContent = Sound.enabled ? "♪" : "×";
+  setInterval(updateTurnTimer, 250);
   connect();
 
   window.addEventListener("online", () => { if (!state.connected) connect(); });

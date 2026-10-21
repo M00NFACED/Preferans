@@ -23,7 +23,7 @@ from .rooms import Connection, Room, RoomManager, normalize_options
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
 # Меняем при изменении правил/клиента: клиент предупредит, если сервер старый.
-APP_VERSION = "2026-10-20-3"
+APP_VERSION = "2026-10-21-4"
 
 manager = RoomManager()
 
@@ -55,6 +55,7 @@ async def _detach(session: Session) -> None:
         room = session.room
         room.connections.pop(session.player_id, None)
         room.set_connected(session.player_id, False)
+        room.after_action()
         await room.broadcast()
     session.room = None
     session.seat = None
@@ -149,6 +150,7 @@ async def handle_join(session: Session, message: dict) -> None:
     await session.conn.send(
         {"type": "joined", "room": room.code, "seat": seat_index, "player_id": session.player_id}
     )
+    room.after_action()
     await room.broadcast()
 
 
@@ -171,6 +173,7 @@ async def handle_resume(session: Session, message: dict) -> None:
     await session.conn.send(
         {"type": "joined", "room": room.code, "seat": seat_index, "player_id": player_id}
     )
+    room.after_action()
     await room.broadcast()
 
 
@@ -183,6 +186,7 @@ async def handle_leave(session: Session, message: dict) -> None:
             room.host_id = next(
                 (s["player_id"] for s in room.seats if s and not s["is_bot"]), None
             )
+        room.after_action()
         await room.broadcast()
         if all(seat is None for seat in room.seats):
             manager.remove(room.code)
@@ -224,8 +228,8 @@ async def handle_start(session: Session, message: dict) -> None:
     if any(seat is None for seat in room.seats):
         raise GameError("not_enough_players", "Нужно трое игроков. Добавьте бота.")
     room.start_match()
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 async def handle_settings(session: Session, message: dict) -> None:
@@ -251,24 +255,24 @@ async def handle_bid(session: Session, message: dict) -> None:
     contract = message.get("contract")
     blind = bool(message.get("blind"))
     room.game.bid(seat, kind, int(contract) if contract is not None else None, blind=blind)
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 async def handle_open_cards(session: Session, message: dict) -> None:
     room, seat = _require_turn(session)
     assert room is not None and seat is not None and room.game is not None
     room.game.open_cards(seat)
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 async def handle_whist_mode(session: Session, message: dict) -> None:
     room, seat = _require_turn(session)
     assert room is not None and seat is not None and room.game is not None
     room.game.whist_mode(seat, bool(message.get("dark")))
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 async def handle_drop(session: Session, message: dict) -> None:
@@ -276,8 +280,8 @@ async def handle_drop(session: Session, message: dict) -> None:
     assert room is not None and seat is not None and room.game is not None
     cards = message.get("cards") or []
     room.game.drop(seat, [int(c) for c in cards])
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 async def handle_declare(session: Session, message: dict) -> None:
@@ -286,32 +290,32 @@ async def handle_declare(session: Session, message: dict) -> None:
     contract = int(message.get("contract", 0))
     without_three = bool(message.get("without_three"))
     room.game.declare(seat, contract, without_three)
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 async def handle_whist(session: Session, message: dict) -> None:
     room, seat = _require_turn(session)
     assert room is not None and seat is not None and room.game is not None
     room.game.whist(seat, message.get("kind", "pass"))
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 async def handle_catch_mizer(session: Session, message: dict) -> None:
     room, seat = _require_turn(session)
     assert room is not None and seat is not None and room.game is not None
     room.game.catch_mizer(seat, bool(message.get("accept")))
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 async def handle_play(session: Session, message: dict) -> None:
     room, seat = _require_turn(session)
     assert room is not None and seat is not None and room.game is not None
     room.game.play(seat, int(message.get("card")))
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 async def handle_next_round(session: Session, message: dict) -> None:
@@ -321,8 +325,8 @@ async def handle_next_round(session: Session, message: dict) -> None:
     if room.game.phase != PHASE_ROUND_END:
         return
     room.start_next_round()
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 async def handle_new_match(session: Session, message: dict) -> None:
@@ -332,8 +336,8 @@ async def handle_new_match(session: Session, message: dict) -> None:
     if room.game is None or room.game.phase != PHASE_MATCH_END:
         raise GameError("in_game", "Матч ещё не закончен.")
     room.reset_match()
-    await room.broadcast()
     room.after_action()
+    await room.broadcast()
 
 
 def _require_turn(session: Session) -> tuple[Room | None, int | None]:
