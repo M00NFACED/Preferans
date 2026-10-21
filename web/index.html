@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0d2417">
 <title>Преферанс — игра с друзьями</title>
-<link rel="stylesheet" href="/css/style.css?v=20261021-4">
+<link rel="stylesheet" href="/css/style.css?v=20261021-5">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%E2%99%A0</text></svg>">
 </head>
 <body>
@@ -131,6 +131,7 @@
       <div class="center">
         <div class="plaque" id="plaque"></div>
         <div class="center-hint" id="center-hint"></div>
+        <div class="actions" id="actions"></div>
         <div class="talon-zone" id="talon"></div>
         <div class="trick-area" id="trick"></div>
       </div>
@@ -142,12 +143,17 @@
       <div class="hand-row">
         <div class="my-info" id="my-info"></div>
         <div class="hand" id="hand"></div>
-        <button class="table-btn" id="btn-scores" type="button" title="Таблица счёта" aria-label="Показать таблицу счёта">
-          <span class="table-btn-icon">▦</span>
-          <span class="table-btn-label">Счёт</span>
-        </button>
+        <div class="hand-tools">
+          <button class="table-btn" id="btn-scores" type="button" title="Таблица счёта" aria-label="Показать таблицу счёта">
+            <span class="table-btn-icon">▦</span>
+            <span class="table-btn-label">Счёт</span>
+          </button>
+          <button class="table-btn" id="btn-cheat-fab" type="button" title="Шпаргалка" aria-label="Открыть шпаргалку">
+            <span class="table-btn-icon">?</span>
+            <span class="table-btn-label">Шпаргалка</span>
+          </button>
+        </div>
       </div>
-      <div class="actions" id="actions"></div>
     </div>
 
     <div class="log-box collapsed" id="log-box">
@@ -228,11 +234,10 @@
 
 <div class="toast" id="toast"></div>
 <canvas id="confetti" class="confetti"></canvas>
-<button class="fab" id="btn-cheat-fab" title="Шпаргалка">?</button>
 
-<script src="/js/cards.js?v=20261021-4"></script>
-<script src="/js/sound.js?v=20261021-4"></script>
-<script src="/js/cheatsheet.js?v=20261021-4"></script>
-<script src="/js/app.js?v=20261021-4"></script>
+<script src="/js/cards.js?v=20261021-5"></script>
+<script src="/js/sound.js?v=20261021-5"></script>
+<script src="/js/cheatsheet.js?v=20261021-5"></script>
+<script src="/js/app.js?v=20261021-5"></script>
 </body>
 </html>
